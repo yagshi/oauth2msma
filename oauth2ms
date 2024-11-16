@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 # Copyright 2020 Harish Krupo
+# (modified by Yagshi 2024 for using multiple accounts)
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -11,9 +12,11 @@
 # limitations under the License.
 
 from xdg.BaseDirectory import (
-        load_first_config,
-        save_data_path
-        )
+    load_first_config,
+    load_config_paths,
+    save_data_path,
+    xdg_config_dirs
+)
 
 import argparse
 import webbrowser
@@ -21,22 +24,18 @@ import logging
 import json
 import msal
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs, urlencode
+from urllib.parse import parse_qs
 from wsgiref import simple_server
 import wsgiref.util
 import sys
 import uuid
 import pprint
 import os
-import atexit
 import base64
 import gnupg
-import io
 
 pp = pprint.PrettyPrinter(indent=4)
 
-credentials_file = save_data_path("oauth2ms") + "/credentials.bin"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,15 +51,17 @@ parser.add_argument("--gpg-home", action="store", default=None,
                     help="Set the gpg home directory")
 parser.add_argument("--no-browser", action="store_true", default=False,
                     help="Don't open a browser with URL. Instead print the URL. Useful inside virtualized environments like WSL.")
+parser.add_argument("--account", action="store", default="default",
+                    help="Specify the account to use")
 
 cmdline_args = parser.parse_args()
-
+credentials_file = f'{save_data_path("oauth2ms")}/credentials_{cmdline_args.account}.bin'
 
 def load_config():
-    config_file = load_first_config(APP_NAME, "config.json")
+    config_file = load_first_config(APP_NAME, f'config_{cmdline_args.account}.json')
     if config_file is None:
-        print(f"Couldn't find configuration file. Config file must be at: $XDG_CONFIG_HOME/{APP_NAME}/config.json")
-        print("Current value of $XDG_CONFIG_HOME is {}".format(os.getenv("XDG_CONFIG_HOME")))
+        paths = [os.path.join(d, APP_NAME, f'config_{cmdline_args.account}.json') for d in xdg_config_dirs]
+        print(f"Couldn't find configuration file. Config file must be one of {paths}")
         return None
     return json.load(open(config_file, 'r'))
 
@@ -226,6 +227,7 @@ def encode_xoauth2(app, token):
     btoken = ("auth=Bearer " + token).encode("ascii")
     xoauth2_bytes = user + C_A + btoken + C_A + C_A
     return base64.b64encode(xoauth2_bytes).decode("utf-8")
+
 
 crypt = None
 if cmdline_args.encrypt_using_fingerprint:
